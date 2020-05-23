@@ -1,0 +1,219 @@
+---
+title: "ASX ALL Ords Time Series data forecasting"
+output: html_notebook
+---
+</br>
+
+### Student Details
+
+* Saurabh Mallik 
+
+</br>
+
+<h3> Introduction </h3>
+
+The purpose of this research is to infer and report certain research questions from the ASX All Ordinaries (Ords) Price Index dataset between January 2003 and May 2017 in Australian Share Market.
+
+The research will help infer whether there is presence of elements like seasonality and stationarity in the dataset, the various seasonal and trend effects and future forecasts.
+
+</br>
+
+<h3> Methodology </h3>
+
+To undertake this research, forecasting methods on R Studio are being used to infer from the dataset.
+
+</br>
+
+<h3> Research and Inferences </h3>
+<h5> 1. To check for Seasonality in the ASX All Ords Price Index </h5>
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(TSA)
+library(tseries)
+library(forecast)
+library(x12)
+```
+
+We read in the dataset and convert it into a time series. This will help infer the various attributes.
+```{r}
+ASX <- read_csv("~/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/ASX_data(1)(1).csv")
+ASX = ts(as.vector(t(as.matrix(ASX$price))), start = c(2003,1), frequency = 12)
+```
+
+
+Next, the time series is plotted to understand and check for seasonality.
+```{r}
+plot(ASX, type = "o", ylab = "Price Index", main = "Time series plot for ASX All Ords Price Index Data")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/01. Time Series for seasonality check.png" width = "90%">
+</center>
+</br>
+From the above time series plot, we can infer that there was an initial upward trend in the price index from 2003 till about 2008, when there was an intervention and the price index fell down a lot. Post intervention there has been a slightly upward trend with few price falls around 2012 and 2015.
+
+There is no repetitive pattern and hence we can infer that there is no seasonality in the time series.
+
+Next, by putting labels on the graph we can take a closer look to check for seasonality in the time series.
+```{r}
+plot(ASX, type = "o", ylab = "Price Index", main = "Time series plot for ASX Price Index with Monthly Characters")
+points(y = ASX, x = time(ASX), pch = as.vector(season(ASX)))
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/02. Time Series with Months.png" width = "90%">
+</center>
+
+As can be seen in the above plot, there is no particular seasonality in the time series. Alothough, post intervention, most of the peaks happen between the months of February and May.
+</br>
+</br>
+
+<h5> 2a. Checking for Stationarity and reconfirming non existance of seasonality</h5>
+
+Next, we display sample ACF and PACF to see the structure of the serial correlation in the series.
+```{r}
+par(mfrow=c(1,2))
+acf(ASX,  main="ACF for ASX All ords Prices") 
+pacf(ASX,  main="PACF for ASX All ords Prices")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/06. ACF PACF.png" width = "90%">
+</center>
+</br>
+
+From the ACF graph we can see a clear trend in the series. There is however no presence of seasonality.
+
+The 1st huge lag in the PACF shows that there is non-stationarity in the time series. In order to correct this we will first check for the lamba using Box Cox transformation and transform the series and check for stationairt using unit root tests.
+
+</br>
+<h5> 2b. Fixing Stationarity using Transformation and Differencing </h5>
+
+We will apply Box Cox transformation to see if it helps with nonstationarity.
+```{r}
+lambda = BoxCox.lambda(ASX)
+lambda
+```
+
+As we get lamba almost equal to 2, we use power transformation to transform the time series to the power of 2 and check for stationarity using Augmented Dickey-Fuller test.
+```{r}
+BC.ASX = (ASX^2)
+adf.test(BC.ASX)
+```
+As the p-value is greater than the significant level (0.05), we fail to reject the null hypothesis and hence the time series is still non-stationary.
+
+Next, we use first difference (using ordinary differencing) to see if the series gets stationary.
+```{r}
+ASX.diff = diff(BC.ASX)
+plot(ASX.diff,type = "o", ylab='Change in price index',xlab='Time', main = "Time series first difference of ASX Transformed Data")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/03. Ordinary Differencing.png" width = "90%">
+</center>
+</br>
+
+From the above graph we can see that the variance is closer around the mean value, and evidence of stationarity exists. To confirm this, we again undertake the Augmented Dickey-Fuller test.
+
+
+```{r}
+adf.test(ASX.diff)
+```
+We can now see that the p value of 0.01 is lesser than the significant level (0.05) and hence we reject the null hypothesis and go with the alternative hypothesis which states that the time series is now stationary.
+</br>
+</br>
+
+<h5> 3. Decomposition to check for seasonal effects. </h5>
+
+Using X12 decomposition, we decompose the time series into seasonally adjusted, trend and original series in order to understand what seasonal and tremnd effects are occurring on the original series.
+```{r}
+ASX.decom.x12 = x12(ASX)
+plot(ASX.decom.x12 , sa=TRUE , trend=TRUE, main = "X12 Decomposed Time Series of ASX All Ords")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/04. x12.png" width = "90%">
+</center>
+</br>
+
+We observe from the above graph we can infer that there is no discernible pattern in the seasonally adjusted graph to determine the existance of a seasonal pattern, also the seasonally adjusted graph changes after the 2008 intervention.
+
+This implies that there are other factors affecting the series apart from seasonal effect.
+
+```{r}
+plotSeasFac(ASX.decom.x12, main = "Seasonal Factors by period and SI Rations for ASX All Ords")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/05. Seasonal Factors.png" width = "90%">
+</center>
+
+We can see that in the months January, February, May, July, September, November and December the expected pattern deviates from the mean values.
+
+It is also observed from the SI Ratios, there exists influantial observations for all months.
+
+We next undertake STL decomposition to isolate seasonal and trend effects to infer on the trend effects.
+
+<h5> 4. Decomposition to check for trend Effects </h5>
+
+```{r}
+ASX.decom <- stl(ASX, t.window=15, s.window="periodic", robust=TRUE)
+plot(ASX.decom, main = "STL Decomposition of ASX All Ords Price Index")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/08. STL Decom.png" width = "90%">
+</center>
+
+The seasonal components shows a pattern such that there are higher prices generually during the months between February and May.
+
+We can also infer that there was a upward trend till the intervention around 2008, followed by a gradually slowwer upward trend post the intervention. 
+
+```{r}
+monthplot(ASX.decom,choice = "trend", main="Trend component of ASX Series", ylab="Trend")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/09. Trend.png" width = "90%">
+</center>
+
+From the trend component we can also infer that during the year, price index tends to rise in the first half of the year and then drop down in the second half of the year. There is slight upward linear trend in the mean values throughout the year.
+</br>
+</br>
+
+<h5> 5. Forecasting for next 5 months ie. June - October 2017. </h5>
+In order to forecast the next 5 months data, we use the naive methodology, as we can see the seasonal component is non changing. 
+```{r}
+forecasts = forecast(ASX.decom, method="naive", h = 5)
+forecasts
+```
+
+From the forecasts we see the point values and the 80% and 95% values for the next 5 months.
+
+The same is plotted in the following graph.
+
+```{r}
+plot(forecasts, ylab="price index", xlab = "Years", main = "Forecast for Next 5 month ASX ALL Ords data")
+```
+
+<center>
+<img src="/Users/saurabhsmacbook/Desktop/Sem 2/MATH1307 - Forecasting/Assignment 1/07. Forecast.png" width = "90%">
+</center>
+
+Most accurate values for the next 5 months in the ASX All Ords Price Index would be the following, based on the naive forecasts above.
+
+* Jun 2017 - 5701.956
+* Jul 2017 - 5729.848
+* Aug 2017 - 5732.540
+* Sep 2017 - 5648.289
+* Oct 2017 - 5762.766
+
+
+
+
+
+
