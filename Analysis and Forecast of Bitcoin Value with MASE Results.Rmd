@@ -1,0 +1,408 @@
+---
+title: "Time Series Analysis"
+subtitle: Analysis and Forecast of Bitcoin Value with MASE Results
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+</br>
+
+### Student Details
+
+* Abhay Rao (S3649215)
+* Dilip Chandra (S3574580)
+* Saurabh Mallik (S3623575)
+
+</br>
+
+<h3> Executive Summary </h3>
+
+
+</br>
+
+<h3> Introduction </h3>
+
+</br>
+
+<h3> Methodology </h3>
+To undertake this research, time series analysis and forecasting methods on R Studio are being used to infer from the dataset.
+</br>
+
+<h3> Analysis and Inferences </h3>
+To check for the nature of the data in the "Bitcoin Market Close PRice" dataset, we first load relevant packages and the dataset.
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+library(readr)
+library(Hmisc)
+library(TSA)
+library(tseries)
+library(forecast)
+library(x12)
+library(fUnitRoots)
+library(lmtest)
+library(FitAR)
+library(CombMSC)
+library(fGarch)
+library(rugarch)
+library(readxl)
+
+residual.analysis <- function(model, std = TRUE,start = 2, class = c("ARIMA","GARCH","ARMA-GARCH")[1]){
+  library(TSA)
+  library(FitAR)
+  if (class == "ARIMA"){
+    if (std == TRUE){
+      res.model = rstandard(model)
+    }else{
+      res.model = residuals(model)
+    }
+  }else if (class == "GARCH"){
+    res.model = model$residuals[start:model$n.used]
+  }else if (class == "ARMA-GARCH"){
+    res.model = model@fit$residuals
+  }else {
+    stop("The argument 'class' must be either 'ARIMA' or 'GARCH' ")
+  }
+  par(mfrow=c(3,2))
+  plot(res.model,type='o',ylab='Standardised residuals', main="Time series plot of standardised residuals")
+  abline(h=0)
+  hist(res.model,main="Histogram of standardised residuals")
+  acf(res.model,main="ACF of standardised residuals")
+  pacf(res.model,main="PACF of standardised residuals")
+  qqnorm(res.model,main="QQ plot of standardised residuals")
+  qqline(res.model, col = 2)
+  print(shapiro.test(res.model))
+  k=0
+  LBQPlot(res.model, lag.max = 30, StartLag = k + 1, k = 0, SquaredQ = FALSE)
+}
+
+sort.score <- function(x, score = c("bic", "aic")){
+  if (score == "aic"){
+    x[with(x, order(AIC)),]
+  } else if (score == "bic") {
+    x[with(x, order(BIC)),]
+  } else {
+    warning('score = "x" only accepts valid arguments ("aic","bic")')
+  }
+}
+
+MASE = function(observed , fitted ){
+  # observed: Observed series on the forecast period
+  # fitted: Forecast values by your model
+  Y.t = observed
+  n = length(fitted)
+  e.t = Y.t - fitted
+  sum = 0 
+  for (i in 2:n){
+    sum = sum + abs(Y.t[i] - Y.t[i-1] )
+  }
+  q.t = e.t / (sum/(n-1))
+  MASE = data.frame( MASE = mean(abs(q.t)))
+  return(list(MASE = MASE))
+}
+```
+We load in the dataset along with the predictor series.
+
+```{r, message=FALSE, warning=FALSE}
+bitc <- read_csv("Bitcoin_Historical_Price.csv")
+bitc_forecast <- read_excel("Bitcoin_Prices_Forecasts.xlsx")
+```
+We need to convert days to understand each day as an individual, hence this datapreprocessing step becomes essential.
+```{r}
+days <- seq(as.Date("2013-04-27"), as.Date("2018-03-11"), by = "day")
+```
+Next, the datasets are converted to time series objects.
+```{r}
+bitc.ts <- ts(bitc$Close,    
+           start = c(2013, as.numeric(format(days[1], "%j"))),
+           frequency = 1)
+
+bitc_forecast.ts <- ts(bitc_forecast$`Closing price`, start = c(2018, as.numeric(format(days[1], "%j"))),
+           frequency = 1)
+```
+
+Next, we plot the time series and check for any insights that we can gain from it.
+```{r}
+plot(bitc.ts, ylab = "Market Value", type = "o", main = "Graph 1. Plot of Bitcoin Close from 27/4/13 - 3/3/2018")
+```
+From graph 1, there does not seem to be any evidence of seasonality. The time series shows evidence of auto regressive behaviour, and there are slight hints of changing variance at the end. It is also visible that there is an upward trend and that over time there has been a sudden increase in bitcoin price, in the past 1-2 years.
+
+We NExt plot the sample ACF and PACF.
+```{r}
+par(mfrow=c(1,2))
+acf(bitc.ts, main="The sample ACF of bitcoin series", lag.max = 100)
+pacf(bitc.ts,main="The sample PACF of bitcoin series")
+par(mfrow=c(1,1))
+```
+The slowly decaying pattern in ACF and very high first correlation in PACF implies the existence of trend and nonstationarity in the series.
+
+We next calculate correlation between bitcoin price.
+```{r}
+y = bitc.ts
+x = zlag(bitc.ts)
+index = 2:length(x)
+cor(y[index], x[index])
+```
+From the above test, we see an 99.7% correlation which is a very strong positive correlation.
+
+We next check to see whether the series is stationary.
+```{r}
+adf.test(bitc.ts)
+```
+The value of p is insignificant, and hence we need to transform the series or difference it and make it stationary.
+
+In order to make the series stationary and test out further ARIMA model fitting, we first use the first try differencing.
+
+```{r}
+logbitc <- log(bitc.ts)
+r.bitc <- diff(logbitc, differences = 1)
+adf.test(r.bitc)
+```
+
+
+We see that the series is now statitionary with a p-value of 0.01, which is significant, hence rejecting the null hypothesis.
+
+We again draw out the ACF and PACF to see for hints of ARIMA model fitting.
+```{r}
+par(mfrow=c(1,2))
+acf(r.bitc, main="The sample ACF of differenced bitcoin series")
+pacf(r.bitc,main="The sample PACF of differenced bitcoin series")
+par(mfrow=c(1,1))
+```
+In the ACF, PACF, and EACF plots we observe significant correlations and there is no sign of a white noise process. However, volatiliy clustering is obvious in the time series plot. So, we will consider fitting an ARMA+GARCH model.
+
+```{r}
+eacf(r.bitc)
+```
+
+McLeod-Li test is significnat at 5% level of significance for all lags. This gives a strong idea about existence of volatiliy clustering.
+```{r}
+McLeod.Li.test(y=r.bitc,main="McLeod-Li test statistics for Daily bitcoin series")
+```
+
+```{r}
+qqnorm(r.bitc,main="Q-Q Normal Plot of Daily bitcoin Returns")
+qqline(r.bitc)
+```
+We see that the dataset is normal in the middle, but the tails are moving away from normal. Fat tails is in accordance with volatiliy clustering
+
+So we'll use absolute value and square transformations to figure out this ARCH effect.
+```{r}
+abs.r.bitc = abs(r.bitc)
+sq.r.bitc = r.bitc^2
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(abs.r.bitc, ci.type="ma",main="The sample ACF plot for return series")
+pacf(abs.r.bitc, main="The sample PACF plot for return series")
+par(mfrow=c(1,1))
+```
+
+```{r}
+eacf(abs.r.bitc)
+```
+After the absolute value transformation, we observe many signficicant lags in both ACF and PACF. Also, EACF do not suggest an ARMA(0,0) model.
+
+From the EACF, we can identify ARMA(1,1), ARMA(1,2), and ARMA(2,2) models for absolute value series. 
+
+These models correspond to parameter settings of [max(1,1),1], [max(1,2),1] and [max(2,2),2]. 
+
+So the corresponding tentative GARCH models are GARCH(1,1), GARCH(2,1), GARCH(2,2).
+```{r}
+par(mfrow=c(1,2))
+acf(sq.r.bitc, ci.type="ma",main="The sample ACF plot for return series")
+pacf(sq.r.bitc, main="The sample PACF plot for return series")
+par(mfrow=c(1,1))
+```
+After the square transformation, we still observe many signficicant lags in both ACF and PACF. Also, EACF do not suggest an ARMA(0,0) model.
+
+```{r}
+eacf(sq.r.bitc)
+```
+From the EACF, we can identify ARMA(2,2), ARMA(2,3), and ARMA(3,3) models for squared series. 
+
+These models correspond to parameter settings of [max(2,2),2], [max(2,2),3], [max(2,3),2], and [max(2,3),3]. So the corresponding tentative GARCH models are GARCH(2,2), GARCH(2,3).
+
+So tentaive garch for model fitting would be {GARCH(1,1), GARCH(2,1) GARCH(2,2), GARCH(2,3)}
+
+```{r}
+m.11 = garch(r.bitc,order=c(1,1),trace = FALSE)
+summary(m.11)
+```
+All the coefficients are significant at 5% level of significance.
+
+```{r}
+m.11_2 = garchFit(formula = ~garch(1,1), data =bitc$Close )
+summary(m.11_2)
+```
+
+
+
+```{r}
+m.21 = garch(r.bitc,order=c(2,1),trace = FALSE)
+summary(m.21)
+```
+All coefficients are significant.
+
+```{r}
+m.21_2 = garchFit(formula = ~garch(1,2), data =bitc$Close )
+summary(m.21_2)
+```
+
+
+```{r}
+m.22 = garch(r.bitc,order=c(2,2),trace = FALSE)
+summary(m.22)
+```
+All the a coefficients are significant at 5% level of significance except a2. the b coefficients are not significant.
+
+```{r}
+m.22_2 = garchFit(formula = ~garch(2,2), data =bitc$Close )
+summary(m.22_2)
+```
+
+
+
+```{r}
+m.23 = garch(r.bitc,order=c(2,3),trace = FALSE)
+summary(m.23)
+```
+a2 and a3 both become insignificant.
+
+```{r}
+m.23_2 = garchFit(formula = ~garch(3,2), data =bitc$Close )
+summary(m.23_2)
+```
+
+
+```{r}
+sc.AIC = AIC(m.11,m.21,m.22,m.23) 
+sort.score(sc.AIC, score = "aic")
+```
+Our AIC scores suggest we use GARCH(1,1) as the best fit.
+
+We move on to residual analysis.
+```{r}
+residual.analysis(m.11, class="GARCH", start = 30)
+```
+
+```{r}
+residual.analysis(m.21, class="GARCH", start = 7)
+```
+
+```{r}
+residual.analysis(m.22, class="GARCH", start = 11)
+```
+
+
+```{r}
+residual.analysis(m.23, class="GARCH", start = 4)
+```
+For all models, we get suitable diagnostic check results. So, we will go on with GARCH(1,1) model.
+
+```{r}
+par(mfrow=c(1,1))
+plot((fitted(m.11)[,1])^2,type='l',ylab='Conditional Variance',xlab='t',main="Estimated Conditional Variances of the Bitcoin Returns")
+```
+Changes in conditional variance at the beginning of the series before 2500 and between observations 2600 and 2800, then at the end.
+
+
+ARMA(1,1) + GARCH(1,1)
+
+```{r}
+model1 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)), 
+                  mean.model = list(armaOrder = c(1, 1), include.mean = FALSE), 
+                  distribution.model = "norm")
+m.11_11 <- ugarchfit(spec = model1, data = r.bitc, out.sample = 100)
+m.11_11
+
+```
+We see that AR(1) and MA(1) coefficients are significant at 5% level of significance, Coefficients of garch are all significant.
+
+We display ACF and QQ plot of standardised residuals with selections of 9 and 10. Athough, residuals are white noise, the distribution of standardised residuals has fat tails and seems to be far from normality.
+```{r}
+plot(m.11_11)
+```
+Now, we will increase the order of GARCH component.
+ARMA(1,1) + GARCH(2,1)
+```{r}
+model2 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(2,1)), 
+                  mean.model = list(armaOrder = c(1, 1), include.mean = FALSE), 
+                  distribution.model = "norm")
+m.11_21 <- ugarchfit(spec = model2, data = r.bitc, out.sample = 100)
+m.11_21
+```
+When we increase the value of p to 2 alpha 2 coefficients turned out to be insignficiant.
+
+ARMA(1,1) + GARCH(2,2)
+```{r}
+model3 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(2,2)), 
+                  mean.model = list(armaOrder = c(1, 1), include.mean = FALSE), 
+                  distribution.model = "norm")
+m.11_22 <- ugarchfit(spec = model3, data = r.bitc, out.sample = 100)
+m.11_22
+```
+
+```{r}
+plot(m.11_22)
+```
+
+We stop here as more GARCH coefficients are turning insignificant.
+
+We conclude the following candidate models - ARMA(1,1) + GARCH(1,1), ARMA(1,1) + GARCH(2,1) and ARMA(1,1) + GARCH(2,2) with information criteria:
+
+Akaike       -3.8065*   -3.8035    -3.8088
+Bayes        -3.7903*	-3.7841	   -3.7861
+Shibata      -3.8065*	-3.8036	   -3.8088
+Hannan-Quinn -3.8005*	-3.7963	   -3.8004
+
+
+According to all information criteria, the model ARMA(1,1) + GARCH(1,1) is the best one among the set of three models. 
+```{r}
+plot(m.11_22)
+```
+When we enter the value 8, we display histogram of standardised residuals. The problem with normality comes from a very large standardised residual. Except this large residual, the normality of the residuals would be reasonable to assume.
+
+
+```{r}
+m.11_22
+```
+According to Ljung-Box test there is no significant correlation effect left in the residuals.
+ARCH LM test (a portmanteau test like a Ljung-Box test) cannot reject the null hypothesis of homoscedasticity.
+
+```{r}
+forc.11_21 = ugarchforecast(m.11_21, data = bitc.ts, n.ahead = 9, n.roll = 10, out.sample = 100)
+plot(forc.11_21, which = "all")
+``` 
+
+```{r}
+forc.11_22 = ugarchforecast(m.11_22, data = bitc.ts, n.ahead = 10, n.roll = 10, out.sample = 100)
+plot(forc.11_22, which = "all")
+```
+
+```{r}
+forc.11_11 = ugarchforecast(m.11_11, data = bitc.ts, n.ahead = 10, n.roll = 10, out.sample = 100)
+plot(forc.11_11, which = "all")
+```
+
+```{r}
+forc = ugarchforecast(m.11_21, data = r.bitc, n.ahead = 10)
+forecasts = forc@forecast$seriesFor
+
+MASE(as.vector(bitc_forecast.ts), as.vector(forecasts))
+```
+
+
+```{r}
+fitted.values = fitted(m.11_21)
+
+log.data = log(bitc.ts)
+        log.data.diff2.back = diffinv(fitted.values, differences = 1)
+        log.data.diff2.back = exp(log.data.diff2.back)
+
+MASE(as.vector(bitc.ts), as.vector(fitted.values))
+```
+</br>
+
+<h3> Conclusion </h3>
+
